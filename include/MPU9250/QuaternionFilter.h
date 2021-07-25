@@ -2,6 +2,9 @@
 #ifndef QUATERNIONFILTER_H
 #define QUATERNIONFILTER_H
 
+#include <cmath>
+#include <esp_timer.h>
+
 enum class QuatFilterSel {
     NONE,
     MADGWICK,
@@ -10,10 +13,10 @@ enum class QuatFilterSel {
 
 class QuaternionFilter {
     // for madgwick
-    float GyroMeasError = PI * (40.0f / 180.0f);     // gyroscope measurement error in rads/s (start at 40 deg/s)
-    float GyroMeasDrift = PI * (0.0f / 180.0f);      // gyroscope measurement drift in rad/s/s (start at 0.0 deg/s/s)
-    float beta = sqrt(3.0f / 4.0f) * GyroMeasError;  // compute beta
-    float zeta = sqrt(3.0f / 4.0f) * GyroMeasDrift;  // compute zeta, the other free parameter in the Madgwick scheme usually set to a small or zero value
+    float GyroMeasError = M_PI * (40.0f / 180.0f);     // gyroscope measurement error in rads/s (start at 40 deg/s)
+    float GyroMeasDrift = M_PI * (0.0f / 180.0f);      // gyroscope measurement drift in rad/s/s (start at 0.0 deg/s/s)
+    float beta = sqrtf(3.0f / 4.0f) * GyroMeasError;  // compute beta
+    float zeta = sqrtf(3.0f / 4.0f) * GyroMeasDrift;  // compute zeta, the other free parameter in the Madgwick scheme usually set to a small or zero value
 
     // for mahony
     float Kp = 30.0;
@@ -29,7 +32,7 @@ public:
     }
 
     void update(float ax, float ay, float az, float gx, float gy, float gz, float mx, float my, float mz, float* q) {
-        newTime = micros();
+        newTime = esp_timer_get_time();
         deltaT = newTime - oldTime;
         oldTime = newTime;
         deltaT = fabs(deltaT * 0.001 * 0.001);
@@ -53,7 +56,7 @@ public:
         q[1] += 0.5f * (q0 * gx + q2 * gz - q3 * gy) * deltaT;
         q[2] += 0.5f * (q0 * gy - q1 * gz + q3 * gx) * deltaT;
         q[3] += 0.5f * (q0 * gz + q1 * gy - q2 * gx) * deltaT;
-        float recipNorm = 1.0 / sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+        float recipNorm = 1.0f / sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
         q[0] *= recipNorm;
         q[1] *= recipNorm;
         q[2] *= recipNorm;
@@ -180,7 +183,7 @@ public:
         tmp = ax * ax + ay * ay + az * az;
         if (tmp > 0.0) {
             // Normalise accelerometer (assumed to measure the direction of gravity in body frame)
-            recipNorm = 1.0 / sqrt(tmp);
+            recipNorm = 1.0f / sqrtf(tmp);
             ax *= recipNorm;
             ay *= recipNorm;
             az *= recipNorm;
@@ -226,7 +229,7 @@ public:
         q[3] += (qa * gz + qb * gy - qc * gx);
 
         // renormalise quaternion
-        recipNorm = 1.0 / sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+        recipNorm = 1.0f / sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
         q[0] = q[0] * recipNorm;
         q[1] = q[1] * recipNorm;
         q[2] = q[2] * recipNorm;
