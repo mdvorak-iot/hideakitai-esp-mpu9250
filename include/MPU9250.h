@@ -526,6 +526,8 @@ private:
                    mag_scale[1];
             m[2] = (float) (mag_count[2] * mag_resolution * mag_bias_factory[2] - mag_bias[2] * bias_to_current_bits) *
                    mag_scale[2];
+        } else {
+            ESP_LOGD("mpu9250", "mag update failed");
         }
     }
 
@@ -536,10 +538,12 @@ private:
             uint8_t raw_data[7];                                             // x/y/z gyro register data, ST2 register stored here, must read ST2 at end of data acquisition
             read_bytes(AK8963_ADDRESS, AK8963_XOUT_L, 7,
                        &raw_data[0]);      // Read the six raw data and ST2 registers sequentially into data array
-            if (MAG_MODE == 0x02 || MAG_MODE == 0x04 || MAG_MODE == 0x06) {  // continuous or external trigger read mode
-                if ((st1 & 0x02) != 0)                                       // check if data is not skipped
-                    return false;                                            // this should be after data reading to clear DRDY register
-            }
+//            TODO without re-reading ST1 register, this does not make sense
+//            if (MAG_MODE == 0x02 || MAG_MODE == 0x04 || MAG_MODE == 0x06) {  // continuous or external trigger read mode
+//                if ((st1 & 0x02) != 0) {                                 // check if data is not skipped
+//                    return false;
+//                }// this should be after data reading to clear DRDY register
+//            }
 
             uint8_t c = raw_data[6];                                         // End data read by reading ST2 register
             if (!(c &
@@ -752,7 +756,7 @@ private:
         int16_t mag_min[3] = {32767, 32767, 32767};
         int16_t mag_temp[3] = {0, 0, 0};
         for (uint16_t ii = 0; ii < sample_count; ii++) {
-            read_mag(mag_temp);  // Read the mag data
+            if (!read_mag(mag_temp)) ESP_LOGD("mpu9250", "read_mag failed during calibration");  // Read the mag data
             for (int jj = 0; jj < 3; jj++) {
                 if (mag_temp[jj] > mag_max[jj]) mag_max[jj] = mag_temp[jj];
                 if (mag_temp[jj] < mag_min[jj]) mag_min[jj] = mag_temp[jj];
@@ -906,7 +910,7 @@ private:
         return b;
     }
 
-    float get_acc_resolution(const ACCEL_FS_SEL accel_af_sel) const {
+    static float get_acc_resolution(const ACCEL_FS_SEL accel_af_sel) {
         switch (accel_af_sel) {
             // Possible accelerometer scales (and their register bit settings) are:
             // 2 Gs (00), 4 Gs (01), 8 Gs (10), and 16 Gs  (11).
@@ -924,7 +928,7 @@ private:
         }
     }
 
-    float get_gyro_resolution(const GYRO_FS_SEL gyro_fs_sel) const {
+    static float get_gyro_resolution(const GYRO_FS_SEL gyro_fs_sel) {
         switch (gyro_fs_sel) {
             // Possible gyro scales (and their register bit settings) are:
             // 250 DPS (00), 500 DPS (01), 1000 DPS (10), and 2000 DPS  (11).
@@ -942,7 +946,7 @@ private:
         }
     }
 
-    float get_mag_resolution(const MAG_OUTPUT_BITS mag_output_bits) const {
+    static float get_mag_resolution(const MAG_OUTPUT_BITS mag_output_bits) {
         switch (mag_output_bits) {
             // Possible magnetometer scales (and their register bit settings) are:
             // 14 bit resolution (0) and 16 bit resolution (1)
@@ -956,7 +960,7 @@ private:
         }
     }
 
-    void write_byte(uint8_t address, uint8_t subAddress, uint8_t data) {
+    void write_byte(uint8_t address, uint8_t subAddress, uint8_t data) const {
         i2c_cmd_handle_t cmd = i2c_cmd_link_create();
         i2c_master_start(cmd);
         i2c_master_write_byte(cmd, (address << 1) | I2C_MASTER_WRITE, true);
@@ -968,23 +972,13 @@ private:
         if (err != ESP_OK) ESP_LOGE("mpu9250", "i2c write_byte error: %d (%s)", err, esp_err_to_name(err));
     }
 
-    void write_addr(uint8_t address, uint8_t subAddress) {
+    uint8_t read_byte(uint8_t address, uint8_t subAddress) const {
+        uint8_t data = 0;                         // `data` will store the register data
+
         i2c_cmd_handle_t cmd = i2c_cmd_link_create();
         i2c_master_start(cmd);
         i2c_master_write_byte(cmd, (address << 1) | I2C_MASTER_WRITE, true);
         i2c_master_write_byte(cmd, subAddress, true);
-        i2c_master_stop(cmd);
-        esp_err_t err = i2c_master_cmd_begin(i2c_port_, cmd, 50 / portTICK_PERIOD_MS);
-        i2c_cmd_link_delete(cmd);
-        if (err != ESP_OK) ESP_LOGE("mpu9250", "i2c write_addr error: %d (%s)", err, esp_err_to_name(err));
-    }
-
-    uint8_t read_byte(uint8_t address, uint8_t subAddress) {
-        write_addr(address, subAddress);
-
-        uint8_t data = 0;                         // `data` will store the register data
-
-        i2c_cmd_handle_t cmd = i2c_cmd_link_create();
         i2c_master_start(cmd);
         i2c_master_write_byte(cmd, (address << 1) | I2C_MASTER_READ, true);
         i2c_master_read_byte(cmd, &data, I2C_MASTER_NACK);
@@ -996,10 +990,11 @@ private:
         return data;                                 // Return data read from slave register
     }
 
-    void read_bytes(uint8_t address, uint8_t subAddress, uint8_t count, uint8_t *dest) {
-        write_addr(address, subAddress);
-
+    void read_bytes(uint8_t address, uint8_t subAddress, uint8_t count, uint8_t *dest) const {
         i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+        i2c_master_start(cmd);
+        i2c_master_write_byte(cmd, (address << 1) | I2C_MASTER_WRITE, true);
+        i2c_master_write_byte(cmd, subAddress, true);
         i2c_master_start(cmd);
         i2c_master_write_byte(cmd, (address << 1) | I2C_MASTER_READ, true);
         i2c_master_read(cmd, dest, count, I2C_MASTER_LAST_NACK);
